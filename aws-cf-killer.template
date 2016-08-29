@@ -326,7 +326,7 @@
     "killerLaunchConfig":{
       "Type":"AWS::AutoScaling::LaunchConfiguration",
       "Properties":{
-        "AssociatePublicIpAddress": false,
+        "AssociatePublicIpAddress": true,
         "SecurityGroups":[
           {
             "Ref":"killerSg"
@@ -335,7 +335,7 @@
         "IamInstanceProfile":{
           "Ref":"killerProfile"
         },
-        "ImageId": "ami-d08bfba3",
+        "ImageId": "ami-8af080f9",
         "InstanceType": "t2.nano",
         "KeyName":{
           "Ref":"KeyName"
