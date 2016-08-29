@@ -1,0 +1,379 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Cloud Formation killer stack",
+  "Parameters": {
+    "KeyName": {
+      "Description": "The EC2 Key Pair to allow Remote Desktop access or SSH to the instances.",
+      "Type": "AWS::EC2::KeyPair::KeyName"
+    }
+  },
+  "Resources": {
+    "vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "InstanceTenancy": "default",
+        "EnableDnsSupport": "true",
+        "EnableDnsHostnames": "true"
+      }
+    },
+    "subnet": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "CidrBlock": "10.0.0.0/24",
+        "VpcId": {
+          "Ref": "vpc"
+        }
+      }
+    },
+    "igw":{
+      "Type":"AWS::EC2::InternetGateway",
+      "Properties":{
+      }
+    },
+    "gatewayAttachIgw":{
+      "Type":"AWS::EC2::VPCGatewayAttachment",
+      "Properties":{
+        "VpcId":{
+          "Ref":"vpc"
+        },
+        "InternetGatewayId":{
+          "Ref":"igw"
+        }
+      }
+    },
+    "dhcpOption":{
+      "Type":"AWS::EC2::DHCPOptions",
+      "Properties":{
+        "DomainName":"ec2.internal",
+        "DomainNameServers":[
+          "AmazonProvidedDNS"
+        ]
+      }
+    },
+    "dchpAssoc":{
+      "Type":"AWS::EC2::VPCDHCPOptionsAssociation",
+      "Properties":{
+        "VpcId":{
+          "Ref":"vpc"
+        },
+        "DhcpOptionsId":{
+          "Ref":"dhcpOption"
+        }
+      }
+    },
+    "routeTable":{
+      "Type":"AWS::EC2::RouteTable",
+      "Properties":{
+        "VpcId":{
+          "Ref":"vpc"
+        }
+      }
+    },
+    "route":{
+      "Type":"AWS::EC2::Route",
+      "Properties":{
+        "DestinationCidrBlock":"0.0.0.0/0",
+        "RouteTableId":{
+          "Ref":"routeTable"
+        },
+        "GatewayId":{
+          "Ref":"igw"
+        }
+      },
+      "DependsOn":"gatewayAttachIgw"
+    },
+    "subnetRoute":{
+      "Type":"AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn":"routeTable",
+      "Properties":{
+        "RouteTableId":{
+          "Ref":"routeTable"
+        },
+        "SubnetId":{
+          "Ref":"subnet"
+        }
+      }
+    },
+    "subnetAcl":{
+      "Type":"AWS::EC2::NetworkAcl",
+      "Properties":{
+        "VpcId":{
+          "Ref":"vpc"
+        }
+      }
+    },
+    "inSubnetAclEntry":{
+      "Type":"AWS::EC2::NetworkAclEntry",
+      "Properties":{
+        "NetworkAclId":{
+          "Ref":"subnetAcl"
+        },
+        "RuleNumber":"32000",
+        "Protocol":"-1",
+        "RuleAction":"allow",
+        "Egress":"false",
+        "CidrBlock":"0.0.0.0/0",
+        "Icmp":{
+          "Code":"-1",
+          "Type":"-1"
+        },
+        "PortRange":{
+          "From":"1",
+          "To":"65535"
+        }
+      }
+    },
+    "outSubnetAclEntry":{
+      "Type":"AWS::EC2::NetworkAclEntry",
+      "Properties":{
+        "NetworkAclId":{
+          "Ref":"subnetAcl"
+        },
+        "RuleNumber":"32000",
+        "Protocol":"-1",
+        "RuleAction":"allow",
+        "Egress":"true",
+        "CidrBlock":"0.0.0.0/0",
+        "Icmp":{
+          "Code":"-1",
+          "Type":"-1"
+        },
+        "PortRange":{
+          "From":"1",
+          "To":"65535"
+        }
+      }
+    },
+    "subnetAclAssocation":{
+      "Type":"AWS::EC2::SubnetNetworkAclAssociation",
+      "Properties":{
+        "SubnetId":{
+          "Ref":"subnet"
+        },
+        "NetworkAclId":{
+          "Ref":"subnetAcl"
+        }
+      }
+    },
+    "bastionSg":{
+      "Type":"AWS::EC2::SecurityGroup",
+      "Properties":{
+        "GroupDescription":"bastion security group",
+        "VpcId":{
+          "Ref":"vpc"
+        },
+        "SecurityGroupIngress":[
+          {
+            "CidrIp":"0.0.0.0/0",
+            "IpProtocol":"tcp",
+            "FromPort":"22",
+            "ToPort":"22"
+          }
+        ],
+        "SecurityGroupEgress":[
+          {
+            "IpProtocol":"-1",
+            "CidrIp":"0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "killerSg":{
+      "Type":"AWS::EC2::SecurityGroup",
+      "Properties":{
+        "GroupDescription":"killerSecurityGroup",
+        "VpcId":{
+          "Ref":"vpc"
+        },
+        "SecurityGroupIngress":[
+          {
+            "IpProtocol":"tcp",
+            "FromPort":"22",
+            "ToPort":"22",
+            "SourceSecurityGroupId":{
+              "Ref":"bastionSg"
+            }
+          }
+        ],
+        "SecurityGroupEgress":[
+          {
+            "IpProtocol":"-1",
+            "CidrIp":"0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "bastionRole":{
+      "Type":"AWS::IAM::Role",
+      "Properties":{
+        "Path":"/application/",
+        "AssumeRolePolicyDocument":{
+          "Statement":[
+            {
+              "Effect":"Allow",
+              "Principal":{
+                "Service":[
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action":[
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "bastionProfile":{
+      "Type":"AWS::IAM::InstanceProfile",
+      "Properties":{
+        "Path":"/application/",
+        "Roles":[
+          {
+            "Ref":"bastionRole"
+          }
+        ]
+      }
+    },
+    "bastionInstance":{
+      "Type":"AWS::EC2::Instance",
+      "Properties":{
+        "IamInstanceProfile":{
+          "Ref":"bastionProfile"
+        },
+        "ImageId": "ami-c15021b2",
+        "InstanceType": "t2.nano",
+        "KeyName":{
+          "Ref":"KeyName"
+        },
+        "Monitoring":"false",
+        "Tags":[
+          {
+            "Key":"Name",
+            "Value":{
+              "Fn::Join":[
+                " - ",
+                [
+                  {
+                    "Ref":"AWS::StackName"
+                  },
+                  "Bastion Host"
+                ]
+              ]
+            }
+          }
+        ],
+        "NetworkInterfaces": [ {
+          "AssociatePublicIpAddress": "true",
+          "DeviceIndex": "0",
+          "GroupSet": [{ "Ref" : "bastionSg" }],
+          "SubnetId": { "Ref" : "subnet" }
+        } ]
+      }
+    },
+    "killerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties":{
+        "AssumeRolePolicyDocument":{
+          "Statement":[
+            {
+              "Effect":"Allow",
+              "Principal":{
+                "Service":[
+                  "ec2.amazonaws.com"
+                ]
+
+              },
+              "Action":[
+                "sts:AssumeRole"
+              ]
+
+            }
+
+          ]
+
+        },
+        "Path":"/",
+        "Policies": [
+          {
+            "PolicyName":"KillerRole",
+            "PolicyDocument":{
+              "Version" : "2012-10-17",
+              "Statement":[
+                {
+                  "Effect":"Allow",
+                  "Action": "*",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "killerProfile":{
+      "Type":"AWS::IAM::InstanceProfile",
+      "Properties":{
+        "Path":"/",
+        "Roles":[
+          {
+            "Ref":"killerRole"
+          }
+        ]
+      }
+    },
+    "killerLaunchConfig":{
+      "Type":"AWS::AutoScaling::LaunchConfiguration",
+      "Properties":{
+        "AssociatePublicIpAddress": false,
+        "SecurityGroups":[
+          {
+            "Ref":"killerSg"
+          }
+        ],
+        "IamInstanceProfile":{
+          "Ref":"killerProfile"
+        },
+        "ImageId": "ami-d08bfba3",
+        "InstanceType": "t2.nano",
+        "KeyName":{
+          "Ref":"KeyName"
+        }
+      }
+    },
+    "killerScalingGroup":{
+      "Type":"AWS::AutoScaling::AutoScalingGroup",
+      "Properties":{
+        "AvailabilityZones":[
+          { "Fn::GetAtt" : [ "subnet", "AvailabilityZone" ] }
+        ],
+        "VPCZoneIdentifier":[{ "Ref":"subnet" }],
+        "LaunchConfigurationName":{
+          "Ref":"killerLaunchConfig"
+        },
+        "MinSize": "1",
+        "MaxSize": "1",
+        "HealthCheckGracePeriod":"300",
+        "HealthCheckType":"ELB",
+        "Tags":[
+          {
+            "Key":"Name",
+            "Value":{
+              "Fn::Join":[
+                " - ",
+                [
+                  {
+                    "Ref":"AWS::StackName"
+                  },
+                  "CF Killer Host"
+                ]
+              ]
+            },
+            "PropagateAtLaunch": true
+          }
+        ]
+      }
+    }
+  }
+}
